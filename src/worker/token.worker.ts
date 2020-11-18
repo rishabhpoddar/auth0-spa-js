@@ -1,49 +1,63 @@
-import { MISSING_REFRESH_TOKEN_ERROR_MESSAGE } from './constants';
+import { MISSING_REFRESH_TOKEN_ERROR_MESSAGE } from '../constants';
+import { WorkerRefreshTokenMessage } from './worker.types';
 
-let refreshTokens = {};
+let refreshTokens: { [key: string]: string } = {};
 
-const cacheKey = (audience, scope) => `${audience}|${scope}`;
+const cacheKey = (audience: string, scope: string) => `${audience}|${scope}`;
 
-const getRefreshToken = (audience, scope) =>
+const getRefreshToken = (audience: string, scope: string) =>
   refreshTokens[cacheKey(audience, scope)];
 
-const setRefreshToken = (refreshToken, audience, scope) =>
-  (refreshTokens[cacheKey(audience, scope)] = refreshToken);
+const setRefreshToken = (
+  refreshToken: string,
+  audience: string,
+  scope: string
+) => (refreshTokens[cacheKey(audience, scope)] = refreshToken);
 
-const deleteRefreshToken = (audience, scope) =>
+const deleteRefreshToken = (audience: string, scope: string) =>
   delete refreshTokens[cacheKey(audience, scope)];
 
-const wait: any = time => new Promise(resolve => setTimeout(resolve, time));
+const wait = (time: number) =>
+  new Promise(resolve => setTimeout(resolve, time));
 
-const messageHandler = async ({
+const messageHandler: (
+  m: MessageEvent<WorkerRefreshTokenMessage>
+) => any = async ({
   data: { url, timeout, audience, scope, ...opts },
   ports: [port]
 }) => {
-  let json;
+  let json: {
+    refresh_token?: string;
+  };
+
   try {
-    const body = JSON.parse(opts.body);
+    const body = JSON.parse(opts.body as string);
+
     if (!body.refresh_token && body.grant_type === 'refresh_token') {
       const refreshToken = getRefreshToken(audience, scope);
+
       if (!refreshToken) {
         throw new Error(MISSING_REFRESH_TOKEN_ERROR_MESSAGE);
       }
+
       opts.body = JSON.stringify({ ...body, refresh_token: refreshToken });
     }
 
     const abortController = new AbortController();
     const { signal } = abortController;
 
-    let response;
+    let response: any;
     try {
       response = await Promise.race([
         wait(timeout),
-        fetch(url, { ...opts, signal })
+        fetch(url, { ...opts, signal } as any)
       ]);
     } catch (error) {
       // fetch error, reject `sendMessage` using `error` key so that we retry.
       port.postMessage({
         error: error.message
       });
+
       return;
     }
 

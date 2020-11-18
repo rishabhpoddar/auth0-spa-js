@@ -14,6 +14,8 @@ import {
 } from './constants';
 
 import { PopupTimeoutError, TimeoutError, GenericError } from './errors';
+import { sendMessage } from './worker/worker.utils';
+import { FetchOptions } from './worker/worker.types';
 
 export const createAbortController = () => new AbortController();
 
@@ -233,34 +235,30 @@ export const bufferToBase64UrlEncoded = (input: number[] | Uint8Array) => {
   );
 };
 
-const sendMessage = (message: any, to: Worker) =>
-  new Promise(function (resolve, reject) {
-    const messageChannel = new MessageChannel();
-    messageChannel.port1.onmessage = function (event) {
-      // Only for fetch errors, as these get retried
-      if (event.data.error) {
-        reject(new Error(event.data.error));
-      } else {
-        resolve(event.data);
-      }
-    };
-    to.postMessage(message, [messageChannel.port2]);
-  });
-
 const switchFetch = async (
   url: string,
   audience: string,
   scope: string,
-  opts: { [index: string]: any },
+  options: FetchOptions & { signal?: AbortSignal },
   timeout: number,
   worker: Worker
 ) => {
   if (worker) {
     // AbortSignal is not serializable, need to implement in the Web Worker
-    delete opts.signal;
-    return sendMessage({ url, audience, scope, timeout, ...opts }, worker);
+    delete options.signal;
+
+    return sendMessage(
+      {
+        url,
+        audience,
+        scope,
+        timeout,
+        ...options
+      },
+      worker
+    );
   } else {
-    const response = await fetch(url, opts);
+    const response = await fetch(url, options);
     return {
       ok: response.ok,
       json: await response.json()
@@ -272,7 +270,7 @@ export const fetchWithTimeout = (
   url: string,
   audience: string,
   scope: string,
-  options: { [index: string]: any },
+  options: FetchOptions,
   worker: Worker,
   timeout = DEFAULT_FETCH_TIMEOUT_MS
 ) => {
@@ -304,7 +302,7 @@ const getJSON = async (
   timeout: number,
   audience: string,
   scope: string,
-  options: { [index: string]: any },
+  options: FetchOptions,
   worker: Worker
 ) => {
   let fetchError: null | Error = null;
@@ -344,8 +342,8 @@ const getJSON = async (
   } = response;
 
   if (!ok) {
-    const errorMessage =
-      error_description || `HTTP error. Unable to fetch ${url}`;
+    // prettier-ignore
+    const errorMessage = error_description || `HTTP error. Unable to fetch ${url}`;
     const e: any = new Error(errorMessage);
 
     e.error = error || 'request_error';
